@@ -1,0 +1,10 @@
+{
+  "name": "node-sgns",
+  "version": "1.0.0",
+  "description": "A simple SGNS Word2Vec implementation in NodeJS",
+  "main": "index.js",
+  "author": "Hendrik Erz <hendrik@zettlr.com>",
+  "license": "GPL-3.0-only",
+  "private": true,
+  "type": "module"
+}
