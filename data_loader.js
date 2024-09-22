@@ -60,6 +60,7 @@ export class DataLoader {
   constructor (textFilePaths) {
     this.files = textFilePaths
     this.vocab = null
+    this.frequencyCounts = null
     this.i2w = null
   }
 
@@ -74,6 +75,7 @@ export class DataLoader {
    */
   async *iter (mode = 'sentence') {
     for (const filePath of this.files) {
+      // console.log(`Reading in file ${this.files.indexOf(filePath)+1}/${this.files.length}`)
         const contents = await fs.readFile(filePath, 'utf-8')
         if (mode === 'document') {
           yield docToWords(contents)
@@ -85,6 +87,18 @@ export class DataLoader {
       }
   }
 
+  docCount () {
+    return this.files.length
+  }
+
+  async sentenceCount () {
+    let count = 0
+    for await (const _ of this.iter('sentence')) {
+      count++
+    }
+    return count
+  }
+
   /**
    * Takes a list of tokens/words and returns their indices in this instance's
    * vocab.
@@ -93,7 +107,7 @@ export class DataLoader {
    *
    * @return  {number[]}         The list of indices
    */
-  wordsToIndices (words) {
+  word2idx (words) {
     if (this.vocab === null) {
       throw new Error('Cannot turn words to indices: Vocab not yet initialized')
     }
@@ -113,40 +127,54 @@ export class DataLoader {
    * @return  {Promise<Record<string, number>>}  The vocab (word -> index)
    */
   async buildVocab (minCount = 5) {
-    const v = new Set()
-
+    // Here we have to count the frequencies of any word. We can't use the
+    // corresponding method.
+    console.log('Counting word frequencies')
+    const counts = {}
+    const total = this.docCount()
+    let i = 0
     for await (const words of this.iter('document')) {
-      // Remove duplicates as early as possible by turning it into a Set
-      for (const word of [... new Set(words)]) {
-        v.add(word)
+      i++
+      process.stdout.write(`\rProcessing ... ${Math.round(i/total*100)}%`)
+      for (const word of words) {
+        counts[word] = (counts[word] || 0) + 1
       }
     }
+    process.stdout.write('\r')
 
-    // Convert the Set into an array, turn that into tuples of word -> index,
-    // and then return a dictionary object from that.
-    this.vocab = Object.fromEntries([...v].map((word, idx) => [word, idx]))
-
-    // Now, prune the vocabulary. For this, first get the frequencies...
-    const count = await this.getFrequencyCounts()
-    for (const [word, idx] of Object.entries(this.vocab)) {
-      if (count[idx] < minCount) {
-        delete this.vocab[word]
-      }
-    }
-
-    // Cleanup the counts the vocab refers to
-    const words = Object.keys(this.vocab)
+    // Now we have the frequency counts and can build the vocabulary, removing
+    // rare words
+    console.log('Creating vocabulary')
     this.vocab = {}
-    for (let i = 0; i < words.length; i++) {
-      this.vocab[words[i]] = Object.keys(this.vocab).length
+    i = 0
+    for (const word in counts) {
+      process.stdout.write(`\rProcessing ... ${i}`)
+      if (counts[word] >= minCount) {
+        this.vocab[word] = i
+        // We use the i to speed up the length calculation so we must increment
+        // it here (but also only if we actually used the index of i)
+        i++
+      }
+    }
+    process.stdout.write('\r')
+
+    // Now that we have the vocab, we can store those frequency counts of those
+    // words that we actually use in the vocabulary for future reference.
+    this.frequencyCounts = zeros(i + 1)
+    for (const word in this.vocab) {
+      this.frequencyCounts[this.vocab[word]] = counts[word]
     }
 
-    // Now create the i2w with the correct information
-
+    // Finally, create the i2w with the correct information
+    console.log('Creating i2w dictionary')
     this.i2w = {}
-    for (const [word, idx] of Object.entries(this.vocab)) {
-      this.i2w[idx] = word
+    i = 0
+    for (const word in this.vocab) {
+      i++
+      process.stdout.write(`\rProcessing ... ${i}`)
+      this.i2w[this.vocab[word]] = word
     }
+    process.stdout.write('\r')
 
     return this.vocab
   }
@@ -169,17 +197,10 @@ export class DataLoader {
    * @return  {Promise<number[]>}  The frequency counts (word -> count)
    */
   async getFrequencyCounts () {
-    const vocab = this.getVocab()
-    const frequencyCounts = zeros(Object.keys(vocab).length)
-
-    for await (const words of this.iter('document')) {
-      for (const word of words) {
-        if (word in vocab) {
-          frequencyCounts[vocab[word]] += 1
-        }
-      }
+    if (this.frequencyCounts == null) {
+      throw new Error('Cannot access frequency counts: You need to build it first using buildVocab().')
     }
 
-    return frequencyCounts
+    return this.frequencyCounts
   }
 }
