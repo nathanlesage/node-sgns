@@ -1,9 +1,8 @@
 // Training functions
 
 import { SGNSModel } from "./sgns.js"
-import { binaryCrossEntropyWithLogits, bmm, zeros } from "./sgns_util.js"
+import { binaryCrossEntropyWithLogits, zeros } from "./sgns_util.js"
 import { randomInt } from "crypto"
-import assert from 'assert'
 import { binomial } from "./binomial.js"
 
 /**
@@ -57,7 +56,7 @@ async function *trainingExamples (
   let batchIdx = 0
 
   for await (const rawSentence of loader.iter('sentence')) {
-    const sentence = loader.wordsToIndices(rawSentence)
+    const sentence = loader.word2idx(rawSentence)
       // Dropout words at this point using a binomial draw
       .filter(idx => binomial(0, 1, dropout[idx]) !== 1)
 
@@ -106,8 +105,8 @@ async function *trainingExamples (
  * @return  {number[][]}              A reference to the contextMat
  */
 function buildNegativeSamples (contextMat, cumsum, batchSize, numNS) {
-  const min = Math.floor(Math.min(...cumsum))
-  const max = Math.floor(Math.max(...cumsum))
+  const min = Math.floor(cumsum[0])
+  const max = Math.floor(cumsum[cumsum.length - 1])
   const randomSample = zeros(batchSize * numNS).map(x => randomInt(min, max))
 
   // Now we need this weird implementation of searchsorted (cf. https://pytorch.org/docs/stable/generated/torch.searchsorted.html)
@@ -152,13 +151,10 @@ export async function train (
 ) {
   const vocab = loader.getVocab()
   const counts = await loader.getFrequencyCounts()
-  // Quick sanity check
-  assert(Object.entries(vocab).length === Object.entries(counts).length, "Frequency counts and Vocab have different lengths. This is a bug.")
 
   const model = new SGNSModel(vocab, embeddingDim)
 
-  // TODO: Implement the optimizer
-  console.log('Starting training with hyper parameters:')
+  console.log('Starting training with hyperparameters:')
   console.log({ embeddingDim, window, numNS, batchSize, nEpochs, lr })
   console.log('')
   let totalBatches = 0
